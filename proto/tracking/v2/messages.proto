@@ -1,0 +1,203 @@
+syntax = "proto3";
+
+package tracking.v2;
+
+option go_package = "github.com/pickpoint/go-sdk/tracking/v2;tracking";
+
+// Shared wire messages for WS (binary frame = one message) and gRPC bidi stream.
+
+message LatLng {
+  double latitude = 1;
+  double longitude = 2;
+  optional double altitude = 3;
+  optional double accuracy = 4;
+  optional double heading = 5;
+  optional double speed = 6;
+  optional int64 timestamp_ms = 7;
+}
+
+message ClientMsg {
+  oneof body {
+    Resume resume = 1;
+    TrackStart track_start = 2;
+    TrackStop track_stop = 3;
+    LocationAdd location_add = 4;
+    LocationBatch location_batch = 5;
+    Subscribe subscribe = 6;
+    Unsubscribe unsubscribe = 7;
+    Ping ping = 8;
+    // Opaque fan-out only (not stored / not resumed). ≤4 KiB, ≤1 Hz per track.
+    Event event = 9;
+    CommandAck command_ack = 10;
+  }
+}
+
+message Resume {
+  string track_uid = 1;
+  uint64 last_client_seq = 2;
+}
+
+message TrackStart {
+  LatLng location = 1;
+  repeated LatLng route = 2;
+  // Opaque app metadata (trip/order/…). ≤4 KiB. Not interpreted by server.
+  bytes metadata = 3;
+}
+
+message TrackStop {
+  string track_uid = 1;
+}
+
+message LocationAdd {
+  string track_uid = 1;
+  uint64 client_seq = 2;
+  LatLng point = 3;
+}
+
+message LocationBatch {
+  string track_uid = 1;
+  uint64 client_seq = 2; // seq of last point in batch
+  repeated LatLng points = 3;
+}
+
+message Subscribe {
+  string device_uid = 1;
+  // Unset = true (receive events). Set false to skip EventAdded fan-out.
+  optional bool include_events = 2;
+  // Extra per-listener throttle for LocationAdded (0 = none beyond server cap).
+  uint32 min_location_interval_ms = 3;
+}
+
+message Unsubscribe {
+  string device_uid = 1;
+}
+
+message Ping {}
+
+// Device → subscribers custom payload. App encodes type inside `payload`.
+message Event {
+  string track_uid = 1;
+  bytes payload = 2;
+  optional int64 timestamp_ms = 3;
+}
+
+message CommandAck {
+  string command_id = 1;
+  CommandAckStatus status = 2;
+  optional string message = 3;
+}
+
+enum CommandAckStatus {
+  COMMAND_ACK_STATUS_UNSPECIFIED = 0;
+  COMMAND_ACK_STATUS_OK = 1;
+  COMMAND_ACK_STATUS_REJECTED = 2;
+  COMMAND_ACK_STATUS_FAILED = 3;
+}
+
+message ServerMsg {
+  oneof body {
+    Hello hello = 1;
+    Relocate relocate = 2;
+    ResumeOk resume_ok = 3;
+    TrackStarted track_started = 4;
+    TrackStopped track_stopped = 5;
+    LocationAdded location_added = 6;
+    Subscribed subscribed = 7;
+    ListenerSubscribed listener_subscribed = 8;
+    Error error = 9;
+    Pong pong = 10;
+    EventAdded event_added = 11;
+    // Server → device (HTTP inject). Opaque, ≤4 KiB, not stored.
+    Command command = 12;
+    DevicePresence device_presence = 13;
+  }
+}
+
+message Hello {
+  string node_id = 1;
+  uint32 shard = 2;
+}
+
+message Relocate {
+  string endpoint = 1;
+  uint32 retry_after_ms = 2;
+}
+
+message ResumeOk {
+  string track_uid = 1;
+  uint64 last_acked_seq = 2;
+}
+
+message TrackStarted {
+  string track_uid = 1;
+  bytes metadata = 2;
+}
+
+message TrackStopped {
+  string track_uid = 1;
+}
+
+message LocationAdded {
+  string device_uid = 1;
+  string track_uid = 2;
+  LatLng point = 3;
+  uint64 client_seq = 4;
+}
+
+message Subscribed {
+  string device_uid = 1;
+  string track_uid = 2;
+  LatLng last_location = 3;
+  // Planned route (if any). Live trail is LocationAdded only — not a full history dump.
+  repeated LatLng route = 4;
+  reserved 5;
+  reserved "locations";
+  double estimated_distance = 6;
+  double estimated_duration = 7;
+  string start_location_name = 8;
+  string end_location_name = 9;
+  bytes metadata = 10;
+  bool online = 11;
+  optional int64 last_seen_ms = 12;
+}
+
+message ListenerSubscribed {}
+
+message Error {
+  ErrorCode code = 1;
+  string message = 2;
+  optional string track_uid = 3;
+  optional uint32 retry_after_ms = 4;
+}
+
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  ERROR_CODE_AUTH = 1;
+  ERROR_CODE_TRACK_NOT_FOUND = 2;
+  ERROR_CODE_FENCED = 3;
+  ERROR_CODE_TRY_AGAIN = 4;
+  ERROR_CODE_INVALID = 5;
+  ERROR_CODE_UNAUTHORIZED = 6;
+}
+
+message Pong {}
+
+message EventAdded {
+  string device_uid = 1;
+  string track_uid = 2;
+  bytes payload = 3;
+  optional int64 timestamp_ms = 4;
+}
+
+// Injected toward an online device session (see POST /v2/devices/{uid}/command).
+message Command {
+  string command_id = 1;
+  bytes payload = 2;
+  optional int64 timestamp_ms = 3;
+}
+
+message DevicePresence {
+  string device_uid = 1;
+  bool online = 2;
+  optional int64 last_seen_ms = 3;
+}

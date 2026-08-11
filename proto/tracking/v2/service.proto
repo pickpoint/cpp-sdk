@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package tracking.v2;
+
+option go_package = "github.com/pickpoint/go-sdk/tracking/v2;tracking";
+
+import "tracking/v2/messages.proto";
+
+// Public bidi session (mounted under /v2/tracking/grpc).
+// Named Session (not Connect) to avoid clashing with tonic client's connect().
+service Tracking {
+  rpc Session(stream ClientMsg) returns (stream ServerMsg);
+}
+
+// Inter-node mesh (MESH_ADDR only, not on public Ingress).
+service Mesh {
+  rpc Forward(stream MeshEnvelope) returns (stream MeshAck);
+  rpc HandOff(HandOffRequest) returns (HandOffResponse);
+}
+
+message MeshEnvelope {
+  string device_uid = 1;
+  ServerMsg event = 2;
+}
+
+message MeshAck {
+  bool ok = 1;
+}
+
+message HandOffRequest {
+  uint32 shard = 1;
+  uint64 epoch = 2;
+  string from_node = 3;
+  string to_node = 4;
+}
+
+message HandOffResponse {
+  bool ok = 1;
+  string message = 2;
+}

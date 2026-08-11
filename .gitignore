@@ -1,0 +1,12 @@
+build/
+build-*/
+.idea/
+.vscode/
+cmake-build-*/
+*.o
+*.a
+*.so
+*.dylib
+.DS_Store
+*.swp
+.cache/
