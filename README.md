@@ -15,9 +15,16 @@ Optional: `-DPICKPOINT_BUNDLED_PROTOBUF=OFF` after installing a same-compiler pr
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPICKPOINT_BUILD_TESTS=ON
 cmake --build build -j
-ctest --test-dir build --output-on-failure
+ctest --test-dir build --output-on-failure -E '^E2E\.'
 # or:
 ./build/pickpoint_tests --gtest_filter='-E2E.*'
+```
+
+On Linux CI / low-memory machines prefer system protobuf and capped parallelism:
+
+```bash
+cmake -S . -B build -DPICKPOINT_BUNDLED_PROTOBUF=OFF -DPICKPOINT_BUILD_TESTS=ON
+cmake --build build -j2
 ```
 
 E2E geocode batch tests require `PICKPOINT_API_KEY`.

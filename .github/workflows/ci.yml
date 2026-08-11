@@ -25,11 +25,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake g++ libcurl4-openssl-dev libssl-dev protobuf-compiler libprotobuf-dev
 
+      # Use distro protobuf on Linux CI. Bundled protobuf+abseil with `cmake --build -j`
+      # OOMs the GitHub runner (processes get SIGTERM / exit 143).
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPICKPOINT_BUILD_TESTS=ON
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPICKPOINT_BUILD_TESTS=ON \
+            -DPICKPOINT_BUNDLED_PROTOBUF=OFF \
+            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
 
       - name: Build
-        run: cmake --build build -j
+        run: cmake --build build -j 2
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build --output-on-failure -E '^E2E\.'
