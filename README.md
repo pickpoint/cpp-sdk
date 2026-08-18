@@ -66,3 +66,7 @@ ctest --test-dir build --output-on-failure -E '^E2E\.'
 ```
 
 E2E geocode batch tests require `PICKPOINT_API_KEY`.
+
+## Contributing
+
+Fork and open a PR against **`dev`**. [CONTRIBUTING.md](CONTRIBUTING.md).
