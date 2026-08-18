@@ -22,7 +22,7 @@ std::string build_ws_url(const Config& cfg) {
 
   auto slash = rest.find('/');
   std::string host = slash == std::string::npos ? rest : rest.substr(0, slash);
-  std::string path = cfg.ws_path.empty() ? "/v2/tracking/ws" : cfg.ws_path;
+  std::string path = cfg.ws_path.empty() ? kDefaultWsPath : cfg.ws_path;
 
   std::string q;
   if (cfg.device) {

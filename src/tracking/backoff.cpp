@@ -28,30 +28,6 @@ std::optional<std::chrono::milliseconds> next_delay(BackoffState& state, double 
 
 void reset_backoff(BackoffState& state) { state.attempt = 0; }
 
-OfflineQueue::OfflineQueue(int max_size) : max_size_(max_size > 0 ? max_size : 10'000) {}
-
-int OfflineQueue::size() const { return static_cast<int>(items_.size()); }
-
-int OfflineQueue::enqueue(std::uint64_t seq, const ::tracking::v2::LatLng& point) {
-  items_.push_back(QueuedPoint{seq, point});
-  if (static_cast<int>(items_.size()) > max_size_) {
-    int dropped = static_cast<int>(items_.size()) - max_size_;
-    items_.erase(items_.begin(), items_.begin() + dropped);
-    return dropped;
-  }
-  return 0;
-}
-
-void OfflineQueue::ack_through(std::uint64_t ack) {
-  items_.erase(std::remove_if(items_.begin(), items_.end(),
-                              [ack](const QueuedPoint& p) { return p.seq <= ack; }),
-               items_.end());
-}
-
-std::vector<QueuedPoint> OfflineQueue::peek_all() const { return items_; }
-
-void OfflineQueue::clear() { items_.clear(); }
-
 bool can_accept_publish(std::chrono::steady_clock::time_point next_allowed_at,
                         std::chrono::steady_clock::time_point now, int point_count) {
   if (point_count <= 0) return true;

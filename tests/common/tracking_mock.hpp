@@ -20,6 +20,10 @@
 
 namespace pickpoint::test {
 
+inline constexpr const char* kMockTrackUid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+inline constexpr const char* kMockDeviceUid = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+inline constexpr const char* kMockNodeId = "cccccccc-cccc-cccc-cccc-cccccccccccc";
+
 inline int free_tcp_port() {
   int fd = ::socket(AF_INET, SOCK_STREAM, 0);
   if (fd < 0) throw std::runtime_error("socket");
@@ -41,19 +45,16 @@ inline int free_tcp_port() {
   return port;
 }
 
-inline std::string encode_server_msg(const ::tracking::v2::ServerMsg& msg) {
-  std::string out;
-  if (!msg.SerializeToString(&out)) throw std::runtime_error("encode server msg");
-  return out;
-}
-
 struct MockConn {
   std::shared_ptr<ix::WebSocket> ws;
   mutable std::mutex mu;
-  std::vector<::tracking::v2::ClientMsg> messages;
+  std::vector<pickpoint::tracking::ClientMsg> messages;
 
-  void send(const ::tracking::v2::ServerMsg& msg) {
-    if (ws) ws->sendBinary(encode_server_msg(msg));
+  void send(const pickpoint::tracking::ServerMsg& msg) {
+    if (ws) {
+      auto bin = pickpoint::tracking::encode_server_msg(msg);
+      ws->sendBinary(std::string(bin.begin(), bin.end()));
+    }
   }
   void close() {
     if (ws) ws->close();
@@ -62,9 +63,9 @@ struct MockConn {
 
 struct MockOpts {
   bool auto_reply = true;
-  std::function<void(const ::tracking::v2::ClientMsg&, MockConn&)> on_msg;
+  std::function<void(const pickpoint::tracking::ClientMsg&, MockConn&)> on_msg;
   std::function<void(int, MockConn&)> before_hello;
-  std::shared_ptr<::tracking::v2::Relocate> relocate_on_connect;
+  std::shared_ptr<pickpoint::tracking::Relocate> relocate_on_connect;
 };
 
 class MockServer {
@@ -75,8 +76,6 @@ class MockServer {
     server_ = std::make_unique<ix::WebSocketServer>(port_, "127.0.0.1");
     server_->disablePerMessageDeflate();
 
-    // Use only setOnClientMessageCallback — setOnConnectionCallback requires
-    // setOnMessageCallback on the socket and otherwise aborts the handshake.
     server_->setOnClientMessageCallback(
         [this](std::shared_ptr<ix::ConnectionState>, ix::WebSocket& webSocket,
                const ix::WebSocketMessagePtr& msg) {
@@ -97,12 +96,15 @@ class MockServer {
             }
             if (opts_.before_hello) opts_.before_hello(idx, *conn);
             if (opts_.relocate_on_connect && idx == 1) {
-              ::tracking::v2::ServerMsg out;
-              *out.mutable_relocate() = *opts_.relocate_on_connect;
+              pickpoint::tracking::ServerMsg out;
+              out.relocate = *opts_.relocate_on_connect;
               conn->send(out);
             } else {
-              ::tracking::v2::ServerMsg out;
-              out.mutable_hello()->set_node_id("mock-1");
+              pickpoint::tracking::ServerMsg out;
+              pickpoint::tracking::Hello hello;
+              hello.version = pickpoint::tracking::kProtocolVersion;
+              hello.node_id = kMockNodeId;
+              out.hello = hello;
               conn->send(out);
             }
             return;
@@ -110,8 +112,12 @@ class MockServer {
           if (msg->type != ix::WebSocketMessageType::Message) return;
           auto conn = find_conn(webSocket);
           if (!conn) return;
-          ::tracking::v2::ClientMsg cm;
-          if (!cm.ParseFromString(msg->str)) return;
+          pickpoint::tracking::ClientMsg cm;
+          try {
+            cm = pickpoint::tracking::decode_client_msg(msg->str);
+          } catch (...) {
+            return;
+          }
           {
             std::lock_guard<std::mutex> lock(conn->mu);
             conn->messages.push_back(cm);
@@ -149,8 +155,9 @@ class MockServer {
     throw std::runtime_error("wait_conn timeout");
   }
 
-  ::tracking::v2::ClientMsg wait_msg(std::function<bool(const ::tracking::v2::ClientMsg&)> pred,
-                                     std::chrono::milliseconds timeout = std::chrono::seconds(2)) {
+  pickpoint::tracking::ClientMsg wait_msg(
+      std::function<bool(const pickpoint::tracking::ClientMsg&)> pred,
+      std::chrono::milliseconds timeout = std::chrono::seconds(2)) {
     auto deadline = std::chrono::steady_clock::now() + timeout;
     while (std::chrono::steady_clock::now() < deadline) {
       {
@@ -181,55 +188,33 @@ class MockServer {
     return nullptr;
   }
 
-  static void handle_auto(MockConn& c, const ::tracking::v2::ClientMsg& msg) {
-    switch (msg.body_case()) {
-      case ::tracking::v2::ClientMsg::kTrackStart: {
-        ::tracking::v2::ServerMsg out;
-        out.mutable_track_started()->set_track_uid("track-mock-1");
-        c.send(out);
-        break;
-      }
-      case ::tracking::v2::ClientMsg::kTrackStop: {
-        ::tracking::v2::ServerMsg out;
-        out.mutable_track_stopped()->set_track_uid(msg.track_stop().track_uid());
-        c.send(out);
-        break;
-      }
-      case ::tracking::v2::ClientMsg::kResume: {
-        ::tracking::v2::ServerMsg out;
-        out.mutable_resume_ok()->set_track_uid(msg.resume().track_uid());
-        out.mutable_resume_ok()->set_last_acked_seq(0);
-        c.send(out);
-        break;
-      }
-      case ::tracking::v2::ClientMsg::kLocationAdd: {
-        ::tracking::v2::ServerMsg out;
-        auto* la = out.mutable_location_added();
-        la->set_track_uid(msg.location_add().track_uid());
-        la->set_client_seq(msg.location_add().client_seq());
-        la->set_device_uid("dev-1");
-        *la->mutable_point() = msg.location_add().point();
-        c.send(out);
-        break;
-      }
-      case ::tracking::v2::ClientMsg::kLocationBatch: {
-        ::tracking::v2::ServerMsg out;
-        auto* la = out.mutable_location_added();
-        la->set_track_uid(msg.location_batch().track_uid());
-        la->set_client_seq(msg.location_batch().client_seq());
-        la->set_device_uid("dev-1");
-        c.send(out);
-        break;
-      }
-      case ::tracking::v2::ClientMsg::kSubscribe: {
-        ::tracking::v2::ServerMsg out;
-        out.mutable_subscribed()->set_device_uid(msg.subscribe().device_uid());
-        out.mutable_subscribed()->set_track_uid("track-mock-1");
-        c.send(out);
-        break;
-      }
-      default:
-        break;
+  void handle_auto(MockConn& c, const pickpoint::tracking::ClientMsg& msg) {
+    using namespace pickpoint::tracking;
+    if (msg.track_start) {
+      ServerMsg out;
+      out.track_started = TrackStarted{kMockTrackUid, {}};
+      c.send(out);
+    } else if (msg.track_stop) {
+      ServerMsg out;
+      out.track_stopped = TrackStopped{kMockTrackUid};
+      c.send(out);
+    } else if (msg.resume) {
+      ServerMsg out;
+      out.resume_ok = ResumeOk{msg.resume->track_uid, 0};
+      c.send(out);
+    } else if (msg.loc) {
+      ServerMsg out;
+      out.ack = Ack{msg.loc->seq};
+      c.send(out);
+    } else if (msg.subscribe) {
+      ServerMsg out;
+      Subscribed s;
+      s.sub = next_sub_++;
+      s.device_uid = msg.subscribe->device_uid;
+      s.track_uid = kMockTrackUid;
+      s.online = true;
+      out.subscribed = s;
+      c.send(out);
     }
   }
 
@@ -239,13 +224,16 @@ class MockServer {
   std::vector<std::shared_ptr<MockConn>> connections_;
   int port_ = 0;
   std::string url_;
+  std::uint8_t next_sub_ = 1;
 };
 
-inline ::tracking::v2::ServerMsg server_error(::tracking::v2::ErrorCode code,
-                                              const std::string& message) {
-  ::tracking::v2::ServerMsg msg;
-  msg.mutable_error()->set_code(code);
-  msg.mutable_error()->set_message(message);
+inline pickpoint::tracking::ServerMsg server_error(pickpoint::tracking::ErrorCode code,
+                                                   const std::string& message) {
+  pickpoint::tracking::ServerMsg msg;
+  pickpoint::tracking::WireError err;
+  err.code = code;
+  err.message = message;
+  msg.error = err;
   return msg;
 }
 
