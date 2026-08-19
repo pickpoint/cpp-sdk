@@ -69,4 +69,4 @@ E2E geocode batch tests require `PICKPOINT_API_KEY`.
 
 ## Contributing
 
-Fork and open a PR against **`dev`**. [CONTRIBUTING.md](CONTRIBUTING.md).
+Fork and open a pull request against **`dev`** — not `main`. Only [pickpoint](https://github.com/pickpoint) organization members can merge `dev` or `main`. Releases are `dev` → `main`.
